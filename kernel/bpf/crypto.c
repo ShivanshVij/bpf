@@ -44,6 +44,7 @@ static DECLARE_RWSEM(bpf_crypto_types_sem);
  * @type:	The pointer to bpf crypto type
  * @tfm:	The pointer to instance of crypto API struct.
  * @siv_len:    Size of IV and state storage for cipher
+ * @authsize:   Size of authentication tag for AEAD ciphers
  * @rcu:	The RCU head used to free the crypto context with RCU safety.
  * @usage:	Object reference counter. When the refcount goes to 0, the
  *		memory is released back to the BPF allocator, which provides
@@ -53,6 +54,7 @@ struct bpf_crypto_ctx {
 	const struct bpf_crypto_type *type;
 	void *tfm;
 	u32 siv_len;
+	u32 authsize;
 	struct rcu_head rcu;
 	refcount_t usage;
 };
@@ -193,6 +195,7 @@ bpf_crypto_ctx_create(const struct bpf_crypto_params *params, u32 params__sz,
 		*err = type->setauthsize(ctx->tfm, params->authsize);
 		if (*err)
 			goto err_free_tfm;
+		ctx->authsize = params->authsize;
 	}
 
 	*err = type->setkey(ctx->tfm, params->key, params->key_len);
@@ -278,8 +281,24 @@ static int bpf_crypto_crypt(const struct bpf_crypto_ctx *ctx,
 	siv_len = siv ? __bpf_dynptr_size(siv) : 0;
 	src_len = __bpf_dynptr_size(src);
 	dst_len = __bpf_dynptr_size(dst);
-	if (!src_len || !dst_len || src_len > dst_len)
-		return -EINVAL;
+
+	/* Handle buffer sizing for AEAD vs non-AEAD ciphers */
+	if (ctx->authsize) {
+		/* AEAD cipher */
+		if (decrypt) {
+			/* For decryption: src includes tag, dst is plaintext */
+			if (!src_len || !dst_len || dst_len != src_len - ctx->authsize)
+				return -EINVAL;
+		} else {
+			/* For encryption: dst needs extra space for tag */
+			if (!src_len || !dst_len || dst_len < src_len + ctx->authsize)
+				return -EINVAL;
+		}
+	} else {
+		/* Non-AEAD cipher (existing logic) */
+		if (!src_len || !dst_len || src_len > dst_len)
+			return -EINVAL;
+	}
 
 	if (siv_len != ctx->siv_len)
 		return -EINVAL;

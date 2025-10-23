@@ -282,29 +282,17 @@ static int bpf_crypto_crypt(const struct bpf_crypto_ctx *ctx,
 	src_len = __bpf_dynptr_size(src);
 	dst_len = __bpf_dynptr_size(dst);
 
-	/* Debug logging for AEAD */
-	if (ctx->authsize) {
-		pr_info("bpf_crypto_crypt: AEAD decrypt=%d src_len=%u dst_len=%u authsize=%u siv_len=%u\n",
-			decrypt, src_len, dst_len, ctx->authsize, siv_len);
-	}
-
 	/* Handle buffer sizing for AEAD vs non-AEAD ciphers */
 	if (ctx->authsize) {
 		/* AEAD cipher */
 		if (decrypt) {
 			/* For decryption: src includes tag, dst is plaintext */
-			if (!src_len || !dst_len || dst_len != src_len - ctx->authsize) {
-				pr_err("bpf_crypto_crypt: AEAD decrypt size check failed: src=%u dst=%u authsize=%u\n",
-					src_len, dst_len, ctx->authsize);
+			if (!src_len || !dst_len || dst_len != src_len - ctx->authsize)
 				return -EINVAL;
-			}
 		} else {
 			/* For encryption: dst needs extra space for tag */
-			if (!src_len || !dst_len || dst_len < src_len + ctx->authsize) {
-				pr_err("bpf_crypto_crypt: AEAD encrypt size check failed: src=%u dst=%u authsize=%u\n",
-					src_len, dst_len, ctx->authsize);
+			if (!src_len || !dst_len || dst_len < src_len + ctx->authsize)
 				return -EINVAL;
-			}
 		}
 	} else {
 		/* Non-AEAD cipher (existing logic) */

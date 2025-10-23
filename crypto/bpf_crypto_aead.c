@@ -118,13 +118,9 @@ static int bpf_crypto_aead_decrypt(void *tfm, const u8 *src, u8 *dst,
 	u8 *src_buf, *dst_buf;
 	int err;
 
-	pr_info("bpf_crypto_aead_decrypt: len=%u authsize=%u\n", len, authsize);
-
 	/* For AEAD decryption, input includes the auth tag */
-	if (len < authsize) {
-		pr_err("bpf_crypto_aead_decrypt: len (%u) < authsize (%u)\n", len, authsize);
+	if (len < authsize)
 		return -EINVAL;
-	}
 
 	req = aead_request_alloc(aead, GFP_ATOMIC);
 	if (!req)

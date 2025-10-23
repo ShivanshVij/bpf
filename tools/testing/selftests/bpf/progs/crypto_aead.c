@@ -10,6 +10,9 @@
 #include "bpf_kfuncs.h"
 #include "crypto_common.h"
 
+#define EINVAL 22
+#define ENOENT 2
+
 /* ChaCha20-Poly1305 test vectors */
 unsigned char aead_key[32] = {};
 u16 udp_test_port = 7778;
@@ -18,11 +21,6 @@ u32 key_len;
 char algo[128] = {};
 char dst[48] = {};  /* Space for plaintext + tag */
 int status;
-int debug_src_len = 0;
-int debug_dst_len = 0;
-int debug_decrypt_result = 0;
-int encrypt_src_len = 0;
-int encrypt_dst_len = 0;
 
 static int skb_dynptr_validate(struct __sk_buff *skb, struct bpf_dynptr *psrc, int data_len)
 {
@@ -124,12 +122,7 @@ int decrypt_aead(struct __sk_buff *skb)
 	bpf_dynptr_from_mem(dst, 32, 0, &pdst);  /* Only 32 bytes for plaintext */
 	bpf_dynptr_from_mem(aead_iv, sizeof(aead_iv), 0, &piv);
 
-	/* Debug: capture sizes */
-	debug_src_len = bpf_dynptr_size(&psrc);
-	debug_dst_len = bpf_dynptr_size(&pdst);
-
 	status = bpf_crypto_decrypt(ctx, &psrc, &pdst, &piv);
-	debug_decrypt_result = status;
 	return TC_ACT_SHOT;
 }
 
@@ -165,12 +158,9 @@ int encrypt_aead(struct __sk_buff *skb)
 	bpf_dynptr_from_mem(dst, sizeof(dst), 0, &pdst);
 	bpf_dynptr_from_mem(aead_iv, sizeof(aead_iv), 0, &piv);
 
-	/* Debug: capture sizes before encryption */
-	encrypt_src_len = bpf_dynptr_size(&psrc);
-	encrypt_dst_len = bpf_dynptr_size(&pdst);
-
 	status = bpf_crypto_encrypt(ctx, &psrc, &pdst, &piv);
 	return TC_ACT_SHOT;
 }
+
 
 char __license[] SEC("license") = "GPL";

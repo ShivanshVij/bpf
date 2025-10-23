@@ -5,6 +5,9 @@
 #include <sys/socket.h>
 #include <net/if.h>
 #include <linux/if_alg.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "test_progs.h"
 #include "network_helpers.h"
@@ -95,13 +98,11 @@ accept_socket:
 
 		/* Success! */
 		current_algo = aead_algos[i];
-		printf("AF_ALG AEAD initialized with algorithm: %s\n", current_algo);
 		return 0;
 	}
 
 	/* All algorithms failed */
-	printf("AF_ALG AEAD init failed - no AEAD algorithm available\n");
-	return ENOTSUP;
+	return EOPNOTSUPP;
 }
 
 static void deinit_afalg(void)
@@ -156,7 +157,7 @@ static int do_crypt_aead(const void *src, void *dst, int size, const void *iv, i
 	return read(opfd, dst, encrypt ? size + 16 : size - 16);
 }
 
-void test_crypto_aead(void)
+static void test_aead_basic(void)
 {
 	LIBBPF_OPTS(bpf_tc_hook, qdisc_hook, .attach_point = BPF_TC_EGRESS);
 	LIBBPF_OPTS(bpf_tc_opts, tc_attach_enc);
@@ -190,8 +191,6 @@ void test_crypto_aead(void)
 	/* Try to init AF_ALG, but don't fail the test if it doesn't work */
 	err = init_afalg_aead();
 	if (err != 0) {
-		printf("Warning: AF_ALG AEAD init failed, continuing without AF_ALG validation\n");
-		printf("This is expected if ChaCha20-Poly1305 is not available in the kernel\n");
 		use_afalg = false;
 		current_algo = NULL;
 	} else {
@@ -226,15 +225,12 @@ void test_crypto_aead(void)
 			skel->bss->key_len = 16;  /* Use AES-128 */
 		}
 
-		printf("Trying BPF AEAD with algorithm: %s\n", chacha_algos[algo_idx]);
-
 		pfd = bpf_program__fd(skel->progs.aead_crypto_setup);
 		if (!ASSERT_GT(pfd, 0, "aead_crypto_setup fd"))
 			goto fail;
 
 		err = bpf_prog_test_run_opts(pfd, &opts);
 		if (err == 0 && opts.retval == 0 && skel->bss->status == 0) {
-			printf("Successfully initialized BPF AEAD with algorithm: %s\n", chacha_algos[algo_idx]);
 			algo_found = true;
 			break;
 		}
@@ -275,9 +271,6 @@ void test_crypto_aead(void)
 	if (!ASSERT_EQ(err, 32, "encrypt send"))
 		goto fail;
 
-	printf("Encrypt debug: src_len=%d, dst_len=%d\n",
-		skel->bss->encrypt_src_len, skel->bss->encrypt_dst_len);
-
 	if (!ASSERT_OK(skel->bss->status, "encrypt status"))
 		goto fail;
 
@@ -300,7 +293,6 @@ void test_crypto_aead(void)
 		/* Check that ciphertext is different from plaintext */
 		if (!ASSERT_NEQ(memcmp(skel->bss->dst, plain_text, 32), 0, "ciphertext different from plaintext"))
 			goto fail;
-		printf("AF_ALG comparison skipped (algorithm mismatch or not available)\n");
 	}
 
 	tc_attach_enc.flags = tc_attach_enc.prog_fd = tc_attach_enc.prog_id = 0;
@@ -326,9 +318,6 @@ void test_crypto_aead(void)
 	close(sockfd);
 	if (!ASSERT_EQ(err, 32 + 16, "decrypt send"))
 		goto fail;
-
-	printf("Decrypt debug: src_len=%d, dst_len=%d, decrypt_result=%d\n",
-		skel->bss->debug_src_len, skel->bss->debug_dst_len, skel->bss->debug_decrypt_result);
 
 	if (!ASSERT_OK(skel->bss->status, "decrypt status"))
 		goto fail;
@@ -359,4 +348,11 @@ fail:
 	deinit_afalg();
 	SYS_NOFAIL("ip netns del " NS_TEST " &> /dev/null");
 	crypto_aead__destroy(skel);
+}
+
+
+void test_crypto_aead(void)
+{
+	if (test__start_subtest("basic"))
+		test_aead_basic();
 }
